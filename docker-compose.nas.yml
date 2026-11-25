@@ -1,0 +1,73 @@
+# LibreDB Studio for a UGREEN NAS, next to the databases already in the Docker app.
+#
+# 1. On your Mac, pack the image the NAS can run (x86_64):
+#      ./scripts/save-ugreen-image.sh
+#    That writes libredb-studio-latest.tar. Copy it to the NAS and import it in
+#    Docker → Image → Import. The imported name is libredb-studio:latest.
+#    If the NAS can reach the internet, skip the tar and set image below to
+#    libredb/libredb-studio:latest so the Docker app pulls it.
+# 2. In the volume line, keep or change the NAS folder for Studio's data.
+# 3. In the UGREEN Docker app: Project → Create, and paste this file.
+# 4. Open http://<nas-ip>:8096
+#    The first start prints a one-time admin password. Read it in the
+#    container log and sign in as admin@libredb.org.
+#
+# admission-postgres is a name only inside the admission-gateway project.
+# Publish Postgres on the NAS, then open it from Studio at the NAS address:
+#   Host: host.docker.internal   Port: 5432   User: gateway
+#   Database: admission, travel, or stock
+#   Password: POSTGRES_PASSWORD from the admission-gateway .env
+#   SSL: disable
+# On the postgres service in admission-gateway, add:
+#   ports:
+#     - "5432:5432"
+# Restart that project before testing the connection.
+#
+# Keep port 8096 on your home network. The page is plain HTTP, so the session
+# cookie is sent with AUTH_COOKIE_SECURE=false. Saved passwords live in the
+# SQLite file on the volume below.
+
+services:
+  libredb-studio:
+    image: libredb-studio:latest
+    container_name: libredb-studio
+    # The image runs the app as uid 1001. A UGREEN shared folder stays owned by
+    # the NAS admin, and the image's chown does not change that, so the app
+    # cannot create auth-bootstrap.json. Open the data directory first.
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /app/data && chmod 777 /app/data && exec docker-entrypoint.sh node server.js"]
+    # Studio's shutdown takes up to 25s. Compose's default stop is 10s.
+    stop_grace_period: 30s
+    ports:
+      - "8096:3000"
+    extra_hosts:
+      # The NAS itself, so published database ports are reachable from here.
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: Asia/Kolkata
+      STORAGE_PROVIDER: sqlite
+      STORAGE_SQLITE_PATH: /app/data/libredb-storage.db
+      AUTH_COOKIE_SECURE: "false"
+      NEXT_PUBLIC_AUTH_PROVIDER: local
+      ADMIN_EMAIL: admin@libredb.org
+      ADMIN_PASSWORD: eeeee
+      # Leave the password and JWT unset. The first start writes them into
+      # /app/data/auth-bootstrap.json and prints the admin password once.
+      # The image default heap is 384MB. A NAS can spare more for large results.
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    volumes:
+      - /volume1/docker/libredb-studio:/app/data
+      - /volume1/docker/lectern:/lectern:ro
+      - /volume1/docker/edunest:/edunest:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/db/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped

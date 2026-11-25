@@ -38,6 +38,8 @@ dist-rel/
 .DS_Store
 *.pem
 *.log
+# NAS import bundle from scripts/save-ugreen-image.sh
+/libredb-studio-latest.tar
 
 # debug
 npm-debug.log*
